@@ -24,7 +24,7 @@ A secure, real-time chat application with end-to-end encryption, built using Fla
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/Arish7777/Secure_Chat_App.git
+git clone https://github.com/yourusername/secure-chat.git
 cd secure-chat
 ```
 

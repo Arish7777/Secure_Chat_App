@@ -7,4 +7,5 @@ python-socketio==5.9.0
 python-engineio==4.8.0
 eventlet==0.33.3
 Werkzeug==2.3.7
-SQLAlchemy==2.0.21 
+SQLAlchemy==2.0.21
+gunicorn==21.2.0 
