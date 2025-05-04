@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Chat App</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.js"></script>
+    <style>
+        .message-container {
+            max-height: calc(100vh - 240px);
+            overflow-y: auto;
+        }
+        .encrypted-badge {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 6px;
+            font-size: 0.7rem;
+            border-radius: 50px;
+            background-color: rgba(79, 70, 229, 0.1);
+            color: #4f46e5;
+        }
+        .typing-indicator {
+            display: inline-flex;
+            align-items: center;
+        }
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            margin: 0 1px;
+            background-color: #9ca3af;
+            border-radius: 50%;
+            display: inline-block;
+            animation: typing 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) {
+            animation-delay: 0s;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes typing {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); }
+            100% { transform: scale(1); }
+        }
+        .message-bubble {
+            position: relative;
+            max-width: 70%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            margin-bottom: 8px;
+            word-wrap: break-word;
+            animation: fadeIn 0.3s ease;
+        }
+        .message-bubble.sent {
+            background-color: #4f46e5;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        .message-bubble.received {
+            background-color: #f3f4f6;
+            color: #1f2937;
+            margin-right: auto;
+            border-bottom-left-radius: 4px;
+        }
+        .badge-encryption {
+            position: absolute;
+            right: 10px;
+            top: -10px;
+            font-size: 10px;
+            background-color: rgba(79, 70, 229, 0.1);
+            color: #4f46e5;
+            padding: 2px 6px;
+            border-radius: 10px;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message-timestamp {
+            font-size: 10px;
+            margin-top: 2px;
+            opacity: 0.7;
+        }
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-online {
+            background-color: #10b981;
+        }
+        .status-offline {
+            background-color: #6b7280;
+        }
+        .file-attachment {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            margin-top: 5px;
+        }
+        .file-icon {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen">
+    <div class="flex h-full flex-col md:flex-row">
+        <!-- Sidebar -->
+        <div id="sidebar" class="w-full md:w-1/4 bg-white shadow-md flex flex-col z-20 fixed md:static top-0 left-0 h-full md:h-auto transition-transform duration-300 md:translate-x-0 -translate-x-full md:translate-x-0">
+            <!-- Mobile Header -->
+            <div class="md:hidden flex items-center justify-between p-4 bg-indigo-600 text-white">
+                <h2 class="text-xl font-bold">
+                    <i class="fas fa-lock mr-2"></i>Secure Chat
+                </h2>
+                <button id="sidebar-close" class="text-white focus:outline-none">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <!-- Header -->
+            <div class="p-4 bg-indigo-600 text-white hidden md:block">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-xl font-bold">
+                        <i class="fas fa-lock mr-2"></i>Secure Chat
+                    </h2>
+                    <div class="encrypted-badge">
+                        <i class="fas fa-shield-alt mr-1"></i>Encrypted
+                    </div>
+                </div>
+                <div class="text-sm mt-1 opacity-80">Welcome, {{ username }}</div>
+            </div>
+            
+            <!-- Server Connection -->
+            <div class="p-4 border-b">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Server Settings</label>
+                    <input type="text" id="server-host" placeholder="localhost" 
+                           class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                </div>
+                <div class="mb-2">
+                    <input type="number" id="server-port" placeholder="5555" 
+                           class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                </div>
+                <button id="connect-btn" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <i class="fas fa-plug mr-2"></i>Connect
+                </button>
+                <div id="connection-status" class="mt-2 text-sm text-center text-gray-500">
+                    Not connected
+                </div>
+            </div>
+            
+            <!-- User List -->
+            <div class="p-4 border-b">
+                <h3 class="font-medium text-gray-700 mb-2 flex items-center">
+                    <i class="fas fa-users mr-2"></i>Chats
+                </h3>
+                <ul id="chat-list" class="space-y-2 max-h-64 overflow-y-auto">
+                    <li id="broadcast-chat" class="cursor-pointer flex items-center justify-between bg-indigo-100 rounded px-2 py-1 font-semibold">
+                        <span><i class="fas fa-broadcast-tower mr-1"></i>Broadcast</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Message Type Toggle -->
+            <div class="p-4 border-b">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Message Type</label>
+                <div class="flex space-x-2">
+                    <button id="broadcast-toggle" class="flex-1 bg-indigo-600 text-white py-2 px-3 rounded-md text-sm">
+                        <i class="fas fa-broadcast-tower mr-1"></i>Broadcast
+                    </button>
+                    <button id="direct-toggle" class="flex-1 bg-gray-200 text-gray-700 py-2 px-3 rounded-md text-sm">
+                        <i class="fas fa-user-friends mr-1"></i>Direct
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Connection Info -->
+            <div class="mt-auto p-4 bg-gray-50 border-t">
+                <div class="flex justify-between items-center">
+                    <a href="{{ url_for('logout') }}" class="text-sm text-indigo-600 hover:text-indigo-900">
+                        <i class="fas fa-sign-out-alt mr-1"></i>Logout
+                    </a>
+                    <div class="text-xs text-gray-500">
+                        <i class="fas fa-shield-alt mr-1"></i>End-to-End Encrypted
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Chat Area -->
+        <div class="flex-1 flex flex-col md:ml-0 ml-0 md:relative" id="main-chat-area">
+            <!-- Mobile Top Bar -->
+            <div class="md:hidden flex items-center justify-between p-4 bg-white shadow-sm border-b">
+                <button id="sidebar-open" class="text-indigo-600 focus:outline-none">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div>
+                    <h2 class="font-bold text-gray-800" id="chat-header">Chat Room</h2>
+                    <div class="text-xs text-gray-500" id="encryption-notice">
+                        <i class="fas fa-lock mr-1"></i>Messages are end-to-end encrypted
+                    </div>
+                </div>
+                <div id="typing-indicator" class="typing-indicator hidden">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+            <!-- Chat Header (Desktop) -->
+            <div class="p-4 bg-white shadow-sm flex items-center justify-between border-b hidden md:flex">
+                <div>
+                    <h2 class="font-bold text-gray-800" id="chat-header">Chat Room</h2>
+                    <div class="text-xs text-gray-500" id="encryption-notice">
+                        <i class="fas fa-lock mr-1"></i>Messages are end-to-end encrypted
+                    </div>
+                </div>
+                <div id="typing-indicator-desktop" class="typing-indicator hidden">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+            
+            <!-- Messages -->
+            <div class="flex-1 bg-gray-50 p-2 md:p-4 message-container overflow-y-auto" id="messages-container">
+                {% if messages and messages|length > 0 %}
+                    {% set last_date = None %}
+                    {% set last_sender = None %}
+                    {% for msg in messages %}
+                        {% set msg_date = msg.timestamp.split(' ')[0] %}
+                        {% set is_new_group = (msg.sender != last_sender) or (msg_date != last_date) %}
+                        {% if msg_date != last_date %}
+                            <div class="text-center text-xs text-gray-400 my-2">
+                                {{ msg_date }}
+                            </div>
+                        {% endif %}
+                        <div class="flex items-end mb-2 {% if msg.sender == username %}justify-end{% else %}justify-start{% endif %} {% if is_new_group %}mt-4{% endif %}">
+                            {% if msg.sender != username and is_new_group %}
+                                <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-200 flex items-center justify-center mr-2 font-bold text-indigo-700">
+                                    {{ msg.sender[0:2]|upper }}
+                                </div>
+                            {% endif %}
+                            <div class="message-bubble {% if msg.sender == username %}sent{% else %}received{% endif %}">
+                                {% if msg.type == 'direct' and is_new_group %}
+                                    <span class="badge-encryption">DM</span>
+                                {% elif is_new_group %}
+                                    <span class="badge-encryption"><i class="fas fa-lock"></i></span>
+                                {% endif %}
+                                {% if is_new_group %}<div class="font-medium">{{ msg.sender }}</div>{% endif %}
+                                <div>{{ msg.content or '' }}</div>
+                                {% if msg.has_file and msg.file_data %}
+                                    <div class="file-attachment">
+                                        <i class="fas fa-file file-icon"></i>
+                                        <span>{{ msg.file_name }}</span>
+                                        <a href="data:{{ msg.file_mime }};base64,{{ msg.file_data }}" download="{{ msg.file_name }}" class="ml-auto text-indigo-600 hover:text-indigo-800">
+                                            <i class="fas fa-download"></i>
+                                        </a>
+                                    </div>
+                                {% endif %}
+                                <div class="message-timestamp text-right">{{ msg.timestamp.split(' ')[1] }}</div>
+                            </div>
+                            {% if msg.sender == username and is_new_group %}
+                                <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center ml-2 font-bold text-white">
+                                    {{ msg.sender[0:2]|upper }}
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% set last_sender = msg.sender %}
+                        {% set last_date = msg_date %}
+                    {% endfor %}
+                {% else %}
+                    <div class="flex justify-center">
+                        <div class="bg-white rounded-lg shadow-sm p-4 text-center max-w-md">
+                            <i class="fas fa-lock text-4xl text-indigo-500 mb-2"></i>
+                            <h3 class="font-medium">Secure Connection</h3>
+                            <p class="text-sm text-gray-600 mt-1">
+                                Connect to the chat server to start messaging
+                            </p>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+            
+            <!-- Message Input -->
+            <div class="bg-white p-2 md:p-4 border-t">
+                <form id="message-form" class="flex space-x-2">
+                    <button type="button" id="file-button" class="p-2 text-gray-500 hover:text-indigo-600 focus:outline-none" title="Attach File">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <button type="button" id="voice-button" class="p-2 text-gray-500 hover:text-green-600 focus:outline-none" title="Record Voice Note">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <input type="file" id="file-input" class="hidden">
+                    <input type="text" id="message-input" placeholder="Type a message..." disabled
+                           class="flex-1 px-2 md:px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm md:text-base">
+                    <button type="submit" id="send-button" disabled
+                            class="bg-indigo-600 text-white p-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </form>
+                <div id="file-preview" class="mt-2 hidden">
+                    <div class="bg-gray-100 p-2 rounded-md flex justify-between items-center">
+                        <div class="flex items-center">
+                            <i class="fas fa-file-alt text-indigo-500 mr-2"></i>
+                            <span id="file-name" class="text-sm truncate"></span>
+                        </div>
+                        <button id="remove-file" class="text-gray-500 hover:text-red-500">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="voice-preview" class="mt-2 hidden">
+                    <div class="bg-gray-100 p-2 rounded-md flex justify-between items-center">
+                        <audio id="voice-audio" controls></audio>
+                        <button id="remove-voice" class="text-gray-500 hover:text-red-500 ml-2">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const socket = io();
+            
+            // Check session status without forcing refresh
+            function checkSession() {
+                fetch('/check_session')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (!data.logged_in) {
+                            // Only redirect if we're not already on the login page
+                            if (!window.location.href.includes('/login')) {
+                                window.location.href = '/login';
+                            }
+                            return;
+                        }
+                        // Update current user if it changed
+                        if (currentUser !== data.username) {
+                            currentUser = data.username;
+                            sessionStorage.setItem('chat_username', currentUser);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Session check failed:', error);
+                        // Don't redirect on network errors
+                    });
+            }
+            
+            // Check session on page load
+            checkSession();
+            
+            // Check session less frequently (every 5 minutes instead of 30 seconds)
+            setInterval(checkSession, 300000);
+            
+            // Per-tab login: use sessionStorage only for chat_username
+            let currentUser = sessionStorage.getItem('chat_username');
+            if (!currentUser) {
+                window.location.href = '/login';
+                return;
+            }
+            
+            // Always ensure the sessionStorage is set for this tab
+            sessionStorage.setItem('chat_username', currentUser);
+            
+            // On logout or switch user:
+            function clearUserStorage() {
+                sessionStorage.removeItem('chat_username');
+            }
+            
+            const logoutLink = document.querySelector('a[href$="logout"]');
+            if (logoutLink) {
+                logoutLink.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    clearUserStorage();
+                    window.location.href = '/logout';
+                });
+            }
+            
+            // Add Switch User button
+            const switchUserBtn = document.createElement('button');
+            switchUserBtn.textContent = 'Switch User';
+            switchUserBtn.className = 'w-full mt-2 bg-gray-200 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';
+            switchUserBtn.onclick = function() {
+                clearUserStorage();
+                window.location.href = '/login';
+            };
+            
+            // Insert Switch User button above Logout
+            const sidebarFooter = document.querySelector('.mt-auto.p-4.bg-gray-50.border-t');
+            if (sidebarFooter) {
+                sidebarFooter.insertBefore(switchUserBtn, sidebarFooter.firstChild);
+            }
+            
+            let isConnected = false;
+            let activeUsers = [];
+            let selectedChatType = 'broadcast';
+            let selectedRecipient = '';
+            let fileData = null;
+            
+            // DOM Elements
+            const connectBtn = document.getElementById('connect-btn');
+            const serverHost = document.getElementById('server-host');
+            const serverPort = document.getElementById('server-port');
+            const connectionStatus = document.getElementById('connection-status');
+            const userList = document.getElementById('user-list');
+            const messagesContainer = document.getElementById('messages-container');
+            const messageForm = document.getElementById('message-form');
+            const messageInput = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+            const chatHeader = document.getElementById('chat-header');
+            const broadcastToggle = document.getElementById('broadcast-toggle');
+            const directToggle = document.getElementById('direct-toggle');
+            const recipientContainer = document.getElementById('recipient-container');
+            const recipientSelect = document.getElementById('recipient-select');
+            const fileButton = document.getElementById('file-button');
+            const fileInput = document.getElementById('file-input');
+            const filePreview = document.getElementById('file-preview');
+            const fileName = document.getElementById('file-name');
+            const removeFile = document.getElementById('remove-file');
+            const voiceButton = document.getElementById('voice-button');
+            const voicePreview = document.getElementById('voice-preview');
+            const voiceAudio = document.getElementById('voice-audio');
+            const removeVoice = document.getElementById('remove-voice');
+            
+            // Initialize server connection settings
+            serverHost.value = 'localhost';
+            serverPort.value = '5555';
+            
+            // Connect to chat server
+            connectBtn.addEventListener('click', function() {
+                const host = serverHost.value || 'localhost';
+                const port = serverPort.value || '5555';
+                connectionStatus.textContent = 'Connecting...';
+                connectionStatus.classList.add('text-yellow-500');
+                socket.emit('connect_to_server', {
+                    username: currentUser,
+                    server_host: host,
+                    server_port: parseInt(port)
+                });
+            });
+            
+            // Socket event handlers
+            socket.on('connection_success', function(data) {
+                isConnected = true;
+                connectionStatus.textContent = data.message;
+                connectionStatus.classList.remove('text-yellow-500', 'text-red-500');
+                connectionStatus.classList.add('text-green-500');
+                
+                connectBtn.textContent = 'Connected';
+                connectBtn.classList.add('bg-green-600');
+                connectBtn.disabled = true;
+                
+                // Enable message input
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                
+                // Clear message container
+                messagesContainer.innerHTML = '';
+                addSystemMessage('Connected to secure chat server. Your messages are encrypted end-to-end.');
+            });
+            
+            socket.on('connection_error', function(data) {
+                isConnected = false;
+                connectionStatus.textContent = data.message;
+                connectionStatus.classList.remove('text-yellow-500', 'text-green-500');
+                connectionStatus.classList.add('text-red-500');
+                
+                connectBtn.textContent = 'Connect';
+                connectBtn.classList.remove('bg-green-600');
+                connectBtn.disabled = false;
+            });
+            
+            socket.on('message', function(data) {
+                if ((selectedChatType === 'broadcast' && data.type === 'message') ||
+                    (selectedChatType === 'direct' && data.type === 'direct_message' && (data.sender === selectedRecipient || data.sender === currentUser))) {
+                    // Instead of reloading all messages, just reload the current chat
+                    loadMessages();
+                }
+            });
+            
+            socket.on('status_update', function(data) {
+                if (data.type === 'user_list') {
+                    fetchUserList();
+                } else if (data.type === 'user_joined') {
+                    addSystemMessage(`${data.username} has joined the chat`);
+                    if (!activeUsers.includes(data.username)) {
+                        activeUsers.push(data.username);
+                        updateUserList(activeUsers);
+                    }
+                } else if (data.type === 'user_left') {
+                    addSystemMessage(`${data.username} has left the chat`);
+                    activeUsers = activeUsers.filter(user => user !== data.username);
+                    updateUserList(activeUsers);
+                }
+            });
+
+            // Typing indicator
+            messageInput.addEventListener('input', function() {
+                if (messageInput.value.trim()) {
+                    socket.emit('typing', { isTyping: true, sender: currentUser });
+                } else {
+                    socket.emit('typing', { isTyping: false, sender: currentUser });
+                }
+            });
+            messageInput.addEventListener('blur', function() {
+                socket.emit('typing', { isTyping: false, sender: currentUser });
+            });
+            // Show typing indicator when another user is typing
+            socket.on('typing', function(data) {
+                const typingIndicator = document.getElementById('typing-indicator');
+                const typingIndicatorDesktop = document.getElementById('typing-indicator-desktop');
+                if (data.isTyping && data.sender !== currentUser) {
+                    if (typingIndicator) {
+                        typingIndicator.classList.remove('hidden');
+                        typingIndicator.textContent = `${data.sender} is typing...`;
+                    }
+                    if (typingIndicatorDesktop) {
+                        typingIndicatorDesktop.classList.remove('hidden');
+                        typingIndicatorDesktop.textContent = `${data.sender} is typing...`;
+                    }
+                } else {
+                    if (typingIndicator) {
+                        typingIndicator.classList.add('hidden');
+                        typingIndicator.textContent = '';
+                    }
+                    if (typingIndicatorDesktop) {
+                        typingIndicatorDesktop.classList.add('hidden');
+                        typingIndicatorDesktop.textContent = '';
+                    }
+                }
+            });
+
+            // Message type toggle
+            broadcastToggle.addEventListener('click', function() {
+                selectedChatType = 'broadcast';
+                selectedRecipient = '';
+                broadcastToggle.classList.add('bg-indigo-600', 'text-white');
+                broadcastToggle.classList.remove('bg-gray-200', 'text-gray-700');
+                directToggle.classList.add('bg-gray-200', 'text-gray-700');
+                directToggle.classList.remove('bg-indigo-600', 'text-white');
+                document.getElementById('chat-list').innerHTML = '';
+                // Only show broadcast chat
+                const broadcastLi = document.createElement('li');
+                broadcastLi.id = 'broadcast-chat';
+                broadcastLi.className = 'cursor-pointer flex items-center justify-between rounded px-2 py-1 font-semibold bg-indigo-100';
+                broadcastLi.innerHTML = `<span><i class="fas fa-broadcast-tower mr-1"></i>Broadcast</span>`;
+                broadcastLi.onclick = function() {
+                    selectedChatType = 'broadcast';
+                    selectedRecipient = '';
+                    highlightSelectedChat();
+                    loadMessages();
+                    chatHeader.textContent = 'Broadcast Room';
+                };
+                document.getElementById('chat-list').appendChild(broadcastLi);
+                highlightSelectedChat();
+                loadMessages();
+                chatHeader.textContent = 'Broadcast Room';
+            });
+
+            directToggle.addEventListener('click', function() {
+                selectedChatType = 'direct';
+                selectedRecipient = '';
+                directToggle.classList.add('bg-indigo-600', 'text-white');
+                directToggle.classList.remove('bg-gray-200', 'text-gray-700');
+                broadcastToggle.classList.add('bg-gray-200', 'text-gray-700');
+                broadcastToggle.classList.remove('bg-indigo-600', 'text-white');
+                fetchUserList();
+                chatHeader.textContent = 'Direct Messages';
+            });
+
+            // Handle message submission
+            messageForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const message = messageInput.value.trim();
+                if (!message && !fileData) return;
+                if (selectedChatType === 'direct' && !selectedRecipient) {
+                    alert('Please select a user to message directly');
+                    return;
+                }
+                const messageData = {
+                    sender: currentUser,
+                    content: message,
+                    type: selectedChatType,
+                    recipient: selectedRecipient,
+                    has_file: fileData ? true : false,
+                    file_data: fileData
+                };
+                socket.emit('send_message', messageData);
+                // Do NOT reload all messages here; rely on socket.on('message') for real-time update
+                messageInput.value = '';
+                messageInput.focus();
+                clearFile();
+            });
+
+            // File handling
+            fileButton.addEventListener('click', function() {
+                fileInput.click();
+            });
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                // Check file size (max 30MB)
+                if (file.size > 30 * 1024 * 1024) {
+                    alert('File size too large. Maximum 30MB allowed.');
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    fileData = {
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        data: event.target.result.split(',')[1] // Remove data URL prefix
+                    };
+                    fileName.textContent = file.name;
+                    filePreview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            });
+            removeFile.addEventListener('click', function() {
+                clearFile();
+            });
+            // Voice note handling
+            let mediaRecorder, voiceChunks = [];
+            voiceButton.addEventListener('click', async function() {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    voiceButton.classList.remove('text-red-600');
+                    voiceButton.innerHTML = '<i class="fas fa-microphone"></i>';
+                    return;
+                }
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('Voice recording not supported in this browser.');
+                    return;
+                }
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    voiceChunks = [];
+                    mediaRecorder.ondataavailable = function(e) {
+                        if (e.data.size > 0) voiceChunks.push(e.data);
+                    };
+                    mediaRecorder.onstop = function() {
+                        const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+                        if (blob.size > 30 * 1024 * 1024) {
+                            alert('Voice note too large. Maximum 30MB allowed.');
+                            return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = function(event) {
+                            fileData = {
+                                name: 'voice_note_' + Date.now() + '.webm',
+                                type: 'audio/webm',
+                                size: blob.size,
+                                data: event.target.result.split(',')[1]
+                            };
+                            voiceAudio.src = event.target.result;
+                            voicePreview.classList.remove('hidden');
+                        };
+                        reader.readAsDataURL(blob);
+                    };
+                    mediaRecorder.start();
+                    voiceButton.classList.add('text-red-600');
+                    voiceButton.innerHTML = '<i class="fas fa-stop"></i>';
+                } catch (err) {
+                    alert('Could not start voice recording: ' + err);
+                }
+            });
+            removeVoice.addEventListener('click', function() {
+                fileData = null;
+                voicePreview.classList.add('hidden');
+                voiceAudio.src = '';
+            });
+
+            // Update user list with online/offline status
+            function updateUserList(users) {
+                userList.innerHTML = '';
+                if (users.length === 0) {
+                    userList.innerHTML = '<li class="text-gray-500 text-sm italic">No users online</li>';
+                    return;
+                }
+                users.forEach(user => {
+                    if (user.username !== currentUser) {
+                        const li = document.createElement('li');
+                        li.className = 'flex items-center justify-between';
+                        li.innerHTML = `
+                            <span>${user.username}</span>
+                            <span class="status-dot ${user.online ? 'status-online' : 'status-offline'}"></span>
+                        `;
+                        userList.appendChild(li);
+                    }
+                });
+            }
+
+            // Fetch user list with online status from API
+            function fetchUserList() {
+                fetch('/api/users').then(res => res.json()).then(data => {
+                    if (data.users) {
+                        updateChatList(data.users);
+                    }
+                });
+            }
+
+            // Initial fetch
+            fetchUserList();
+
+            // Sidebar toggle for mobile
+            const sidebar = document.getElementById('sidebar');
+            const sidebarOpen = document.getElementById('sidebar-open');
+            const sidebarClose = document.getElementById('sidebar-close');
+            if (sidebarOpen) {
+                sidebarOpen.addEventListener('click', function() {
+                    sidebar.classList.remove('-translate-x-full');
+                });
+            }
+            if (sidebarClose) {
+                sidebarClose.addEventListener('click', function() {
+                    sidebar.classList.add('-translate-x-full');
+                });
+            }
+
+            // Update chat list (sidebar) with all users for DMs
+            function updateChatList(users) {
+                const chatList = document.getElementById('chat-list');
+                chatList.innerHTML = '';
+                if (selectedChatType === 'broadcast') {
+                    // Only show broadcast chat
+                    const broadcastLi = document.createElement('li');
+                    broadcastLi.id = 'broadcast-chat';
+                    broadcastLi.className = 'cursor-pointer flex items-center justify-between rounded px-2 py-1 font-semibold bg-indigo-100';
+                    broadcastLi.innerHTML = `<span><i class="fas fa-broadcast-tower mr-1"></i>Broadcast</span>`;
+                    broadcastLi.onclick = function() {
+                        selectedChatType = 'broadcast';
+                        selectedRecipient = '';
+                        highlightSelectedChat();
+                        loadMessages();
+                        chatHeader.textContent = 'Broadcast Room';
+                    };
+                    chatList.appendChild(broadcastLi);
+                } else {
+                    // Show all users for DMs (with online/offline status only)
+                    users.forEach(user => {
+                        const li = document.createElement('li');
+                        li.className = 'cursor-pointer flex items-center justify-between rounded px-2 py-1' + (selectedChatType === 'direct' && selectedRecipient === user.username ? ' bg-indigo-100 font-semibold' : '');
+                        let statusHtml = '';
+                        statusHtml = `<span class="status-dot ${user.online ? 'status-online' : 'status-offline'}"></span>`;
+                        li.innerHTML = `
+                            <span>${user.username === currentUser ? '<i class="fas fa-user mr-1"></i>Me' : user.username}</span>
+                            ${statusHtml}
+                        `;
+                        li.onclick = function() {
+                            selectedChatType = 'direct';
+                            selectedRecipient = user.username;
+                            highlightSelectedChat();
+                            loadMessages();
+                            chatHeader.textContent = `Direct Message with ${user.username === currentUser ? 'Me' : user.username}`;
+                        };
+                        chatList.appendChild(li);
+                    });
+                }
+            }
+            // Helper: time ago for last seen
+            function timeAgo(isoDate) {
+                if (!isoDate) return '';
+                const now = new Date();
+                const then = new Date(isoDate);
+                const seconds = Math.floor((now - then) / 1000);
+                if (seconds < 60) return 'just now';
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return minutes + ' min ago';
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return hours + ' hr ago';
+                const days = Math.floor(hours / 24);
+                return days + ' day' + (days > 1 ? 's' : '') + ' ago';
+            }
+            function highlightSelectedChat() {
+                document.querySelectorAll('#chat-list li').forEach(li => li.classList.remove('bg-indigo-100', 'font-semibold'));
+                if (selectedChatType === 'broadcast') {
+                    document.getElementById('broadcast-chat').classList.add('bg-indigo-100', 'font-semibold');
+                } else {
+                    document.querySelectorAll('#chat-list li').forEach(li => {
+                        if (li.textContent.includes(selectedRecipient)) {
+                            li.classList.add('bg-indigo-100', 'font-semibold');
+                        }
+                    });
+                }
+            }
+            // Load messages for the selected chat
+            function loadMessages() {
+                let url = '/api/messages?type=' + selectedChatType;
+                if (selectedChatType === 'direct') url += '&recipient=' + encodeURIComponent(selectedRecipient);
+                fetch(url).then(res => res.json()).then(data => {
+                    renderMessages(data.messages);
+                });
+            }
+            // Render messages in the chat area (reuse your grouping logic)
+            function renderMessages(messages) {
+                messagesContainer.innerHTML = '';
+                if (!messages || messages.length === 0) {
+                    messagesContainer.innerHTML = `<div class="flex justify-center"><div class="bg-white rounded-lg shadow-sm p-4 text-center max-w-md"><i class="fas fa-lock text-4xl text-indigo-500 mb-2"></i><h3 class="font-medium">Secure Connection</h3><p class="text-sm text-gray-600 mt-1">Connect to the chat server to start messaging</p></div></div>`;
+                    return;
+                }
+                let lastDate = null, lastSender = null;
+                messages.forEach(msg => {
+                    const msgDate = msg.timestamp.split(' ')[0];
+                    const isNewGroup = (msg.sender !== lastSender) || (msgDate !== lastDate);
+                    if (msgDate !== lastDate) {
+                        const dateDiv = document.createElement('div');
+                        dateDiv.className = 'text-center text-xs text-gray-400 my-2';
+                        dateDiv.textContent = (msgDate === (new Date().toISOString().slice(0,10))) ? 'Today' : msgDate;
+                        messagesContainer.appendChild(dateDiv);
+                    }
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = `flex items-end mb-2 ${msg.sender === currentUser ? 'justify-end' : 'justify-start'} ${isNewGroup ? 'mt-4' : ''}`;
+                    if (msg.sender !== currentUser && isNewGroup) {
+                        const avatar = document.createElement('div');
+                        avatar.className = 'flex-shrink-0 w-8 h-8 rounded-full bg-indigo-200 flex items-center justify-center mr-2 font-bold text-indigo-700';
+                        avatar.textContent = msg.sender.substring(0,2).toUpperCase();
+                        groupDiv.appendChild(avatar);
+                    }
+                    const bubble = document.createElement('div');
+                    bubble.className = `message-bubble ${msg.sender === currentUser ? 'sent' : 'received'}`;
+                    if (msg.type === 'direct' && isNewGroup) {
+                        bubble.innerHTML += `<span class="badge-encryption">DM</span>`;
+                    } else if (isNewGroup) {
+                        bubble.innerHTML += `<span class="badge-encryption"><i class="fas fa-lock"></i></span>`;
+                    }
+                    if (isNewGroup) bubble.innerHTML += `<div class="font-medium">${msg.sender}</div>`;
+                    // Voice note
+                    if (msg.has_file && msg.file_data && msg.file_mime && msg.file_mime.startsWith('audio/')) {
+                        bubble.innerHTML += `<audio controls src="data:${msg.file_mime};base64,${msg.file_data}"></audio>`;
+                    } else if (msg.has_file && msg.file_data && msg.file_mime && msg.file_mime.startsWith('image/')) {
+                        bubble.innerHTML += `<img src="data:${msg.file_mime};base64,${msg.file_data}" alt="image" class="max-w-xs max-h-60 rounded mb-2">`;
+                    } else if (msg.has_file && msg.file_data && msg.file_mime && msg.file_mime.startsWith('video/')) {
+                        bubble.innerHTML += `<video controls src="data:${msg.file_mime};base64,${msg.file_data}" class="max-w-xs max-h-60 rounded mb-2"></video>`;
+                    } else {
+                        bubble.innerHTML += `<div>${msg.content || ''}</div>`;
+                    }
+                    if (msg.has_file && msg.file_data && !msg.file_mime.startsWith('audio/') && !msg.file_mime.startsWith('image/') && !msg.file_mime.startsWith('video/')) {
+                        bubble.innerHTML += `<div class="file-attachment"><i class="fas fa-file file-icon"></i><span>${msg.file_name}</span><a href="data:${msg.file_mime};base64,${msg.file_data}" download="${msg.file_name}" class="ml-auto text-indigo-600 hover:text-indigo-800"><i class="fas fa-download"></i></a></div>`;
+                    }
+                    bubble.innerHTML += `<div class="message-timestamp text-right">${msg.timestamp.split(' ')[1]}</div>`;
+                    groupDiv.appendChild(bubble);
+                    if (msg.sender === currentUser && isNewGroup) {
+                        const avatar = document.createElement('div');
+                        avatar.className = 'flex-shrink-0 w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center ml-2 font-bold text-white';
+                        avatar.textContent = msg.sender.substring(0,2).toUpperCase();
+                        groupDiv.appendChild(avatar);
+                    }
+                    messagesContainer.appendChild(groupDiv);
+                    lastSender = msg.sender;
+                    lastDate = msgDate;
+                });
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+            function clearFile() {
+                fileData = null;
+                fileInput.value = '';
+                filePreview.classList.add('hidden');
+                fileName.textContent = '';
+                // Also hide voice preview if needed
+                if (voicePreview) {
+                    voicePreview.classList.add('hidden');
+                    voiceAudio.src = '';
+                }
+            }
+        });
+    </script>
+</body>
+</html>
